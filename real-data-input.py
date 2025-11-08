@@ -332,7 +332,7 @@ st.title("Weld Line AI 통합 진단 및 최적화 시스템")
 tab1, tab2 = st.tabs(["탭 1. 진단 및 최적 공정 조건 제시", "탭 2. 모델 및 데이터 확인"])
 
 with tab1:
-    # 🌟🌟🌟 수정된 부분: st.slider를 정수형으로 사용 🌟🌟🌟
+    # 🌟🌟🌟 A. 현재 공정 조건 입력 (정수형 슬라이더) 🌟🌟🌟
     st.header("A. 현재 공정 조건 입력 (슬라이더)")
     
     ui_vars = st.session_state['ui_display_vars']
@@ -574,7 +574,7 @@ with tab1:
         bounds_list = []
         for var in global_vars:
             if var in input_vars:
-                # 🌟🌟🌟 수정된 부분: 노하우 적용 대상/미대상에 따라 경계값 설정 방식 변경
+                # 🌟🌟🌟 노하우 적용 대상/미대상에 따라 경계값 설정 방식 변경
                 
                 # UI 입력 변수 중 노하우 적용 대상 변수
                 if var in st.session_state['selected_knowhow_vars']:
@@ -628,4 +628,183 @@ with tab1:
                     max_delta = range_span * 0.01 
                     
                     # 확신 수준이 100%(1.0)이면 변동 폭 0으로 고정
-                    delta = max_delta * (1 - influence_
+                    # 🚨 Syntax Error 수정: influence_factor 변수를 제대로 닫아줍니다.
+                    delta = max_delta * (1 - influence_factor) 
+                    
+                    lower = max(current_value - delta, bounds[0])
+                    upper = min(current_value + delta, bounds[1])
+                    
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
+                    
+                elif intent == 'Increase':
+                    # Increase: 현재 값보다 일정 수준 이상으로 제약 (영향 계수만큼 강하게)
+                    increase_base = (bounds[1] - bounds[0]) * 0.05
+                    lower_limit = current_value + influence_factor * increase_base
+                    
+                    lower = min(lower_limit, bounds[1]) # 상한 경계를 넘지 않도록
+                    
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
+
+                elif intent == 'Decrease':
+                    # Decrease: 현재 값보다 일정 수준 이하로 제약 (영향 계수만큼 강하게)
+                    decrease_base = (bounds[1] - bounds[0]) * 0.05
+                    upper_limit = current_value - influence_factor * decrease_base
+                    
+                    upper = max(upper_limit, bounds[0]) # 하한 경계를 넘지 않도록
+                    
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
+                    
+            # 미선택된 변수는 이미 Bounds에서 고정되었으므로, 추가적인 제약(Constraints)은 필요 없음.
+
+        # 5. 최적화 실행
+        try:
+            result = minimize(objective, x0, method='SLSQP', bounds=bounds_list, constraints=constraints)
+            
+            # 6. 결과 처리
+            if result.success:
+                # 🌟🌟🌟 최적화 결과 값도 정수형으로 반올림하여 표시 (UI 목적)
+                optimized_vars = pd.Series(result.x, index=global_vars).round().astype(int).to_dict()
+                optimized_risk = objective(result.x)
+                
+                st.session_state['optimization_result'] = {
+                    "success": True,
+                    # 결과 표시를 위해 문자열로 변환 시 정수로 표시
+                    "optimized_vars": {var: f"{val}" for var, val in optimized_vars.items()},
+                    "optimized_risk": optimized_risk,
+                    "initial_vars": x0_dict, # 초기값 저장
+                    "message": "최적 공정 조건 제시 성공"
+                }
+            else:
+                st.session_state['optimization_result'] = {
+                    "success": False,
+                    "message": f"최적화 실패: {result.message}"
+                }
+                
+        except Exception as e:
+            st.session_state['optimization_result'] = {
+                "success": False,
+                "message": f"최적화 중 예외 발생: {e}"
+            }
+    # ------------------------------------------------------------------
+
+
+    # 진단 및 최적화 버튼
+    col_diag, col_opt = st.columns(2)
+    with col_diag:
+        if st.button("진단 실행", type="primary", use_container_width=True, disabled=st.session_state['model'] is None or not ui_vars):
+            run_diagnosis_callback(input_vars)
+            
+    with col_opt:
+        if st.button("최적 공정 조건 제시", type="secondary", use_container_width=True, disabled=st.session_state['model'] is None or not ui_vars):
+            run_optimization_callback(input_vars)
+
+    
+    # 결과 표시
+    st.subheader("진단 및 최적화 결과")
+    
+    if st.session_state['current_risk_display'] is not None:
+        risk = st.session_state['current_risk_display'] * 100
+        
+        risk_color = "red" if risk >= 50 else ("orange" if risk >= 20 else "green")
+        risk_text = "높음 (불량 가능성 높음)" if risk >= 50 else ("보통 (주의 필요)" if risk >= 20 else "낮음 (양호)")
+        
+        st.metric(
+            label="현재 조건 Weld Line 불량 위험도", 
+            value=f"{risk:.2f}%", 
+            delta_color="off"
+        )
+        st.markdown(f"**진단 결과**: <span style='color:{risk_color}; font-weight:bold;'>{risk_text}</span>", unsafe_allow_html=True)
+        st.markdown("---")
+
+    if st.session_state['optimization_result']:
+        result = st.session_state['optimization_result']
+        if result['success']:
+            
+            st.markdown("#### ✅ 최적화 결과 요약")
+            col_risk, col_message = st.columns([1, 2])
+            with col_risk:
+                st.metric(
+                    label="최소 불량 위험 확률",
+                    value=f"{result['optimized_risk'] * 100:.2f}%",
+                    delta_color="off"
+                )
+            with col_message:
+                st.info(f"💡 최적화 성공 메시지: {result['message']}")
+            st.markdown("---")
+            
+            optimized_vars_data = []
+            for var, opt_val_str in result['optimized_vars'].items():
+                # 정수형 입력/출력을 위해 문자열을 정수로 변환 후 비교
+                opt_val = int(opt_val_str) 
+                init_val = int(result['initial_vars'].get(var, 0.0))
+                
+                # 변화율 계산을 위한 실수 변환
+                if init_val != 0:
+                    percent_change = ((opt_val - init_val) / init_val) * 100
+                else:
+                    percent_change = 0.0 if opt_val == 0.0 else np.nan 
+                    
+                direction = ""
+                if np.isnan(percent_change):
+                    direction = "N/A"
+                elif opt_val > init_val:
+                    direction = "Increase ▲"
+                elif opt_val < init_val:
+                    direction = "Decrease ▼"
+                else:
+                    direction = "Keep"
+
+                optimized_vars_data.append({
+                    'Variable': var,
+                    'Initial Value (Input)': f"{init_val}",
+                    'Optimized Value': f"{opt_val}",
+                    'Optimization Direction': direction,
+                    'Change (%)': f"{percent_change:.1f}%" if not np.isnan(percent_change) else 'N/A'
+                })
+                
+            optimized_df = pd.DataFrame(optimized_vars_data)
+            
+            ui_optimized_df = optimized_df[optimized_df['Variable'].isin(st.session_state['ui_display_vars'])].reset_index(drop=True)
+            other_optimized_df = optimized_df[~optimized_df['Variable'].isin(st.session_state['ui_display_vars'])].reset_index(drop=True)
+            
+            st.markdown("#### 🚀 최적 공정 조건 상세 (UI 입력 변수)")
+            st.dataframe(ui_optimized_df, hide_index=True, use_container_width=True)
+
+            with st.expander("숨겨진 나머지 공정 변수 보기 (고정값)"):
+                st.dataframe(other_optimized_df, hide_index=True, use_container_width=True)
+            
+        else:
+            st.error(f"❌ 최적화 실패: {result['message']}")
+
+
+with tab2:
+    st.header("모델 및 데이터 상세 정보")
+
+    st.subheader("1. 데이터 컬럼 상세")
+    if not st.session_state['df_weld'].empty:
+        global_vars_df = pd.DataFrame({
+            'Index': range(len(st.session_state['global_process_vars'])),
+            'Column Name (Variable)': st.session_state['global_process_vars'],
+            'Role': ['UI Input' if var in st.session_state['ui_display_vars'] else 'Fixed Process Variable' for var in st.session_state['global_process_vars']]
+        })
+        st.dataframe(global_vars_df, hide_index=True)
+    else:
+        st.info("데이터를 로드하고 모델을 학습시켜야 컬럼 정보가 표시됩니다.")
+        
+    st.subheader("2. 학습 데이터 미리보기 (10행)")
+    if not st.session_state['df_weld'].empty:
+        st.dataframe(st.session_state['df_weld'].head(10))
+    else:
+        st.info("학습 데이터가 로드되지 않았습니다.")
+        
+    st.subheader("3. 모델 계수 (회귀 분석)")
+    model = st.session_state['model']
+    if model:
+        coeffs = pd.DataFrame({
+            'Variable': st.session_state['global_process_vars'],
+            'Coefficient (Scaled)': model.coef_[0]
+        }).sort_values(by='Coefficient (Scaled)', key=abs, ascending=False)
+        st.dataframe(coeffs, hide_index=True)
+    else:
+        st.info("모델이 학습되지 않았습니다.")
