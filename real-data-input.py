@@ -14,19 +14,14 @@ import json
 st.set_page_config(layout="wide", page_title="Weld Line 통합 진단 시스템")
 
 # 🌟 UI 입력 변수 정의 (초기 조건 파일에 따라 동적으로 설정됨)
-# 임시 기본값 및 경계: (최적화에 필요)
 GLOBAL_BOUNDS = {
     'T_Melt': (200.0, 300.0), 'V_Inj': (1.0, 10.0), 'P_Pack': (50.0, 100.0), 
     'T_Mold': (30.0, 80.0), 'Meter': (180.0, 200.0), 'VP_Switch_Pos': (10.0, 20.0)
 }
-# 실제 UI에 표시될 변수 목록
 if 'ui_display_vars' not in st.session_state:
     st.session_state['ui_display_vars'] = [] 
 
-# 🌟 전체 공정 변수 리스트는 학습 데이터에서 동적으로 결정됩니다.
 GLOBAL_PROCESS_VARS = [] 
-
-# 종속 변수 정의 (Y 변수)
 TARGET_VAR = 'Y_Weld'
 DEFECT_THRESHOLD = 0.5
 
@@ -59,15 +54,14 @@ if 'conf_level' not in st.session_state:
 if 'influence_factor_display_val' not in st.session_state:
     st.session_state['influence_factor_display_val'] = st.session_state['conf_level'] / 100.0
 
-for var in ['v_inj', 't_mold']:
-    if f'{var}_qual_apply' not in st.session_state:
-        st.session_state[f'{var}_qual_apply'] = False
-    if f'{var}_quant_apply' not in st.session_state:
-        st.session_state[f'{var}_quant_apply'] = False
-    if f'{var}_qual_intent' not in st.session_state:
-        st.session_state[f'{var}_qual_intent'] = 'Keep_Constant'
-    if f'{var}_quant_percent' not in st.session_state:
-        st.session_state[f'{var}_quant_percent'] = 0.0
+# 🌟🌟🌟 수정된 부분: 모든 변수의 노하우 설정을 담을 딕셔너리 🌟🌟🌟
+# { 'Variable_Name': { 'qual_apply': False, 'qual_intent': 'Keep_Constant', 'quant_apply': False, 'quant_percent': 0.0 } }
+if 'knowhow_settings' not in st.session_state:
+    st.session_state['knowhow_settings'] = {}
+    
+if 'knowhow_temp_storage' not in st.session_state:
+    st.session_state['knowhow_temp_storage'] = {}
+# ------------------------------------------------------------------
 
 
 # -------------------------------------------------------------
@@ -140,6 +134,7 @@ def process_weld_data(df_virtual, df_real):
     all_vars = [col for col in df_combined.columns if col != TARGET_VAR]
     st.session_state['global_process_vars'] = all_vars
     
+    # 0.5 이상이면 불량(1), 미만이면 양호(0)로 이진 분류
     df_combined[TARGET_VAR] = np.where(df_combined[TARGET_VAR] >= DEFECT_THRESHOLD, 1, 0)
     
     required_cols = all_vars + [TARGET_VAR]
@@ -156,7 +151,6 @@ def train_model(df):
         
     global_vars = st.session_state['global_process_vars']
     
-    # 🌟🌟🌟 수정된 로직: 타겟 변수 및 독립 변수 추출 🌟🌟🌟
     X = df[global_vars]
     Y = df[TARGET_VAR]
 
@@ -164,11 +158,7 @@ def train_model(df):
     if Y.nunique() < 2:
         st.error(f"🚨 모델 학습 실패: 타겟 변수('{TARGET_VAR}')에 **두 개 이상의 클래스** (0과 1)가 존재해야 합니다. 현재 데이터셋에는 클래스가 {Y.nunique()}개만 존재합니다. 학습 데이터 파일을 확인해 주세요.")
         return None, None
-    # -----------------------------------------------------
     
-    # NaN/Inf 값 체크는 MinMaxScaler/fit_transform에서 처리되지만, 명시적으로 방어 코드를 남기지 않습니다.
-    # df.fillna(0)에서 대부분의 NaN은 처리되었음.
-
     scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(X)
     
@@ -245,7 +235,6 @@ with st.sidebar:
             st.session_state['scaler'] = None
             return
 
-        # 수정된 train_model 호출
         model, scaler = train_model(st.session_state['df_weld'])
         st.session_state['model'] = model
         st.session_state['scaler'] = scaler
@@ -262,6 +251,7 @@ with st.sidebar:
             
             init_row = st.session_state['df_init'].iloc[0].to_dict()
             
+            # UI 슬라이더 초기값 설정
             for var in st.session_state['ui_display_vars']:
                 if var in init_row:
                     try:
@@ -272,6 +262,7 @@ with st.sidebar:
                 else:
                     st.session_state[f'input_{var}'] = 0.0
 
+            # 나머지 변수 초기값 저장
             default_init_values = {}
             for var in global_vars:
                 if var not in st.session_state['ui_display_vars']:
@@ -279,9 +270,21 @@ with st.sidebar:
                 
             st.session_state['default_init_values'] = default_init_values
             st.success("✅ UI 입력 변수 및 전체 변수 기본값 설정 완료")
-        else:
-             # train_model에서 오류가 발생했으므로 여기서 추가 메시지를 표시할 필요 없음
-             pass
+            
+            # 🌟🌟🌟 수정된 부분: 모든 UI 변수에 대한 노하우 설정 초기화/업데이트 🌟🌟🌟
+            knowhow_settings = st.session_state.get('knowhow_settings', {})
+            for var in st.session_state['ui_display_vars']:
+                if var not in knowhow_settings:
+                    # 기본 설정
+                    knowhow_settings[var] = {
+                        'qual_apply': False, 
+                        'qual_intent': 'Keep_Constant', 
+                        'quant_apply': False, 
+                        'quant_percent': 0.0
+                    }
+            st.session_state['knowhow_settings'] = knowhow_settings
+            st.session_state['knowhow_temp_storage'] = {} # 임시 저장소 초기화
+            # ------------------------------------------------------------------
 
 
     st.button("🚀 파일 로드 및 AI 모델 학습 시작", on_click=load_and_train_model)
@@ -325,6 +328,7 @@ with tab1:
         cols = st.columns(3)
         input_vars = {}
         
+        # UI 입력 변수 슬라이더 동적 생성
         for i, var in enumerate(ui_vars):
             min_val = GLOBAL_BOUNDS.get(var, (0.0, 300.0))[0] 
             max_val = GLOBAL_BOUNDS.get(var, (0.0, 300.0))[1] 
@@ -350,9 +354,10 @@ with tab1:
     # B. 전문가의 정성적/정량적 노하우 입력
     st.header("B. 전문가의 정성적/정량적 노하우 입력")
     
+    # 1. 전문가 확신 수준
     st.subheader("1. 전문가 확신 수준")
     st.write("노하우 반영도 (%)") 
-    expert_confidence = st.slider(
+    st.slider(
         '노하우 반영도 (%)', 
         0.0, 
         100.0, 
@@ -364,58 +369,93 @@ with tab1:
     )
     st.markdown('<div style="margin-top: -20px; font-size: 12px; color: grey;">(0%는 노하우 미반영, 100%는 노하우를 제약 조건으로 강력히 적용)</div>', unsafe_allow_html=True)
     
-    V_INJ_VAR = 'V_Inj'
-    T_MOLD_VAR = 'T_Mold'
-    V_INJ_VAR_EXISTS_IN_UI = V_INJ_VAR in st.session_state['ui_display_vars']
-    T_MOLD_VAR_EXISTS_IN_UI = T_MOLD_VAR in st.session_state['ui_display_vars']
+    # 🌟🌟🌟 수정된 부분: 모든 UI 변수에 대한 노하우 설정 동적 생성 🌟🌟🌟
+    st.subheader("2. 공정 변수별 노하우 입력")
     
+    # 임시 저장소를 비우고 재사용
+    st.session_state['knowhow_temp_storage'] = {}
     
-    # 2. 사출 속도 (V_Inj)
-    st.subheader(f"2. 사출 속도 ({V_INJ_VAR})")
-    if V_INJ_VAR_EXISTS_IN_UI:
-        col_v_qual, col_v_intent, col_v_quant, col_v_delta = st.columns(4)
-        with col_v_qual:
-             v_inj_qual_apply = st.checkbox('정성적 노하우 적용', value=st.session_state['v_inj_qual_apply'], key='v_inj_qual_apply_chk', on_change=lambda: st.session_state.update({'optimization_result': None}))
-             st.session_state['v_inj_qual_apply'] = v_inj_qual_apply
-        with col_v_intent:
-            v_inj_intent = st.selectbox('V_Inj 조절 의도', ['Keep_Constant', 'Increase', 'Decrease'], index=['Keep_Constant', 'Increase', 'Decrease'].index(st.session_state['v_inj_qual_intent']), disabled=not v_inj_qual_apply, key='intent_v_inj_selectbox', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['v_inj_qual_intent'] = v_inj_intent
-        with col_v_quant:
-            v_inj_quant_apply = st.checkbox('정량적 노하우 적용', value=st.session_state['v_inj_quant_apply'], key='v_inj_quant_apply_chk', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['v_inj_quant_apply'] = v_inj_quant_apply
-        with col_v_delta:
-            st.write('V_Inj 노하우 변화율 (%)')
-            v_inj_quant_percent = st.slider('V_Inj 변화율', 0.0, 100.0, value=st.session_state['v_inj_quant_percent'], step=1.0, label_visibility="collapsed", disabled=not v_inj_quant_apply, key='v_inj_quant_percent_slider', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['v_inj_quant_percent'] = v_inj_quant_percent
+    if not ui_vars:
+        st.info("UI 입력 변수가 없습니다. **모델 학습**을 먼저 실행해 주세요.")
     else:
-        st.info(f"UI 입력 변수 목록에 **{V_INJ_VAR}** 컬럼이 없어 노하우를 적용할 수 없습니다.")
-        v_inj_intent = 'Keep_Constant'
-        v_inj_quant_percent = 0.0
-        v_inj_quant_apply = False
+        for var in ui_vars:
+            
+            # 초기 설정값 (안전 장치)
+            settings = st.session_state['knowhow_settings'].get(var, {
+                'qual_apply': False, 'qual_intent': 'Keep_Constant', 'quant_apply': False, 'quant_percent': 0.0
+            })
+            
+            with st.expander(f"⚙️ **{var}** 노하우 설정 (현재 설정: {settings['qual_intent']} / ±{settings['quant_percent']:.0f}%)"):
+                col_qual, col_quant = st.columns(2)
+                
+                # --- 정성적 노하우 ---
+                with col_qual:
+                    st.markdown("##### 1. 정성적 노하우")
+                    
+                    # Checkbox for Qualitative Know-how
+                    qual_apply = st.checkbox(
+                        '정성적 노하우 적용', 
+                        value=settings['qual_apply'], 
+                        key=f'{var}_qual_apply_chk',
+                        on_change=lambda: st.session_state.update({'optimization_result': None})
+                    )
+                    
+                    # Selectbox for Qualitative Intent
+                    qual_intent = st.selectbox(
+                        f'{var} 조절 의도', 
+                        ['Keep_Constant', 'Increase', 'Decrease'], 
+                        index=['Keep_Constant', 'Increase', 'Decrease'].index(settings['qual_intent']),
+                        disabled=not qual_apply,
+                        key=f'intent_{var}_selectbox',
+                        on_change=lambda: st.session_state.update({'optimization_result': None})
+                    )
+                    
+                    # 임시 저장소에 현재 값 저장
+                    st.session_state['knowhow_temp_storage'][var] = {
+                        **st.session_state['knowhow_temp_storage'].get(var, settings),
+                        'qual_apply': qual_apply,
+                        'qual_intent': qual_intent
+                    }
 
-    
-    # 3. 금형 온도 (T_Mold)
-    st.subheader(f"3. 금형 온도 ({T_MOLD_VAR})")
-    if T_MOLD_VAR_EXISTS_IN_UI:
-        col_t_qual, col_t_intent, col_t_quant, col_t_delta = st.columns(4)
-        with col_t_qual:
-            t_mold_qual_apply = st.checkbox('정성적 노하우 적용', value=st.session_state['t_mold_qual_apply'], key='t_mold_qual_apply_chk', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['t_mold_qual_apply'] = t_mold_qual_apply
-        with col_t_intent:
-            t_mold_intent = st.selectbox('T_Mold 조절 의도', ['Keep_Constant', 'Increase', 'Decrease'], index=['Keep_Constant', 'Increase', 'Decrease'].index(st.session_state['t_mold_qual_intent']), disabled=not t_mold_qual_apply, key='intent_t_mold_selectbox', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['t_mold_qual_intent'] = t_mold_intent
-        with col_t_quant:
-            t_mold_quant_apply = st.checkbox('정량적 노하우 적용', value=st.session_state['t_mold_quant_apply'], key='t_mold_quant_apply_chk', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['t_mold_quant_apply'] = t_mold_quant_apply
-        with col_t_delta:
-            st.write('T_Mold 노하우 변화율 (%)')
-            t_mold_quant_percent = st.slider('T_Mold 변화율', 0.0, 100.0, value=st.session_state['t_mold_quant_percent'], step=1.0, label_visibility="collapsed", disabled=not t_mold_quant_apply, key='t_mold_quant_percent_slider', on_change=lambda: st.session_state.update({'optimization_result': None}))
-            st.session_state['t_mold_quant_percent'] = t_mold_quant_percent
-    else:
-        st.info(f"UI 입력 변수 목록에 **{T_MOLD_VAR}** 컬럼이 없어 노하우를 적용할 수 없습니다.")
-        t_mold_intent = 'Keep_Constant'
-        t_mold_quant_percent = 0.0
-        t_mold_quant_apply = False
+
+                # --- 정량적 노하우 ---
+                with col_quant:
+                    st.markdown("##### 2. 정량적 노하우")
+                    
+                    # Checkbox for Quantitative Know-how
+                    quant_apply = st.checkbox(
+                        '정량적 노하우 적용', 
+                        value=settings['quant_apply'], 
+                        key=f'{var}_quant_apply_chk',
+                        on_change=lambda: st.session_state.update({'optimization_result': None})
+                    )
+                    
+                    # Slider for Quantitative Percent
+                    st.write(f'{var} 노하우 변화율 (%)')
+                    quant_percent = st.slider(
+                        f'{var} 변화율', 
+                        0.0, 
+                        100.0, 
+                        value=settings['quant_percent'], 
+                        step=1.0, 
+                        label_visibility="collapsed", 
+                        disabled=not quant_apply, 
+                        key=f'{var}_quant_percent_slider',
+                        on_change=lambda: st.session_state.update({'optimization_result': None})
+                    )
+                    
+                    # 임시 저장소에 현재 값 저장
+                    current_temp_settings = st.session_state['knowhow_temp_storage'].get(var, settings)
+                    st.session_state['knowhow_temp_storage'][var] = {
+                        **current_temp_settings,
+                        'quant_apply': quant_apply,
+                        'quant_percent': quant_percent
+                    }
+        
+        # 루프 종료 후 최종적으로 knowhow_settings 업데이트
+        st.session_state['knowhow_settings'].update(st.session_state['knowhow_temp_storage'])
+
+    # ------------------------------------------------------------------
 
 
     st.markdown("---")
@@ -452,9 +492,11 @@ with tab1:
 
         full_input_data = {}
         
+        # 1. UI 입력값 (슬라이더 값)
         for var in input_vars:
             full_input_data[var] = input_vars[var]
 
+        # 2. 나머지 변수 (UI 입력창이 없는 변수 - 고정값)
         for var in global_vars:
             if var not in full_input_data:
                 full_input_data[var] = st.session_state['default_init_values'].get(var, 0.0) 
@@ -466,7 +508,8 @@ with tab1:
         st.session_state['optimization_result'] = None 
 
     
-    def run_optimization_callback(input_vars, v_inj_intent, v_inj_quant_percent, v_inj_qual_apply, t_mold_intent, t_mold_quant_percent, t_mold_qual_apply):
+    # 🌟🌟🌟 수정된 부분: 함수 시그니처에서 개별 노하우 변수 제거 🌟🌟🌟
+    def run_optimization_callback(input_vars):
         """최적 공정 조건 제시 버튼 클릭 시 실행 (다변수 처리)"""
         model = st.session_state['model']
         scaler = st.session_state['scaler']
@@ -476,9 +519,6 @@ with tab1:
             st.session_state['optimization_result'] = {"success": False, "message": "모델이 학습되지 않았습니다."}
             return
             
-        v_inj_exists_in_global = V_INJ_VAR in global_vars
-        t_mold_exists_in_global = T_MOLD_VAR in global_vars
-        
         # 🌟 1. 초기 조건 (X0): 전체 변수를 포함
         x0_dict = {}
         for var in global_vars:
@@ -493,8 +533,10 @@ with tab1:
         bounds_list = []
         for var in global_vars:
             if var in input_vars:
+                # UI 입력 변수는 GLOBAL_BOUNDS 또는 임시 경계 사용
                 bounds_list.append(GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
             else:
+                # 나머지 변수는 현재 초기값으로 고정 (제약 조건)
                 init_val = x0_dict[var]
                 bounds_list.append((init_val, init_val))
 
@@ -505,85 +547,64 @@ with tab1:
             risk = predict_weld_risk(model, scaler, x_series)
             return risk
 
-        # 4. 제약 조건 (Constraints): 노하우 반영
+        # 4. 제약 조건 (Constraints): 노하우 반영 (전체 변수로 확장)
         constraints = []
         influence_factor = st.session_state['influence_factor_display_val']
         
-        v_inj_index = global_vars.index(V_INJ_VAR) if v_inj_exists_in_global else -1
-        v_inj_current = x0_dict.get(V_INJ_VAR, 0.0)
+        # UI 입력 변수 목록을 순회하며 노하우 제약 조건 생성
+        for var in st.session_state['ui_display_vars']:
+            
+            # 변수가 전체 공정 변수 목록에 포함되어 있어야 함
+            if var not in global_vars:
+                 continue 
+                 
+            index = global_vars.index(var)
+            current_value = x0_dict.get(var, 0.0)
+            settings = st.session_state['knowhow_settings'].get(var, {})
+            
+            # 경계값 (Bounds)도 필요.
+            bounds = GLOBAL_BOUNDS.get(var, (0.0, 300.0))
 
-        t_mold_index = global_vars.index(T_MOLD_VAR) if t_mold_exists_in_global else -1
-        t_mold_current = x0_dict.get(T_MOLD_VAR, 0.0)
-
-        
-        # 4-1. V_Inj 정성적 노하우
-        if v_inj_index != -1 and v_inj_qual_apply and V_INJ_VAR in input_vars: 
-            if v_inj_intent == 'Keep_Constant':
-                delta = v_inj_current * (1 - influence_factor) * 0.1
-                lower = v_inj_current - delta
-                upper = v_inj_current + delta
-                constraints.append({'type': 'ineq', 'fun': lambda x: x[v_inj_index] - lower})
-                constraints.append({'type': 'ineq', 'fun': lambda x: upper - x[v_inj_index]})
+            # 4-1. 정성적 노하우
+            if settings.get('qual_apply') and var in input_vars: 
+                intent = settings.get('qual_intent')
                 
-            elif v_inj_intent == 'Increase':
-                lower = v_inj_current + influence_factor * 0.1 
-                constraints.append({'type': 'ineq', 'fun': lambda x: x[v_inj_index] - lower})
+                if intent == 'Keep_Constant':
+                    # 현재 값 근처에 강하게 제약 (influence_factor가 1에 가까울수록 더 좁게 제약)
+                    delta = current_value * (1 - influence_factor) * 0.1 
+                    lower = current_value - delta
+                    upper = current_value + delta
+                    # 람다 함수 내에서 변수 캡처를 위해 기본 인수를 사용
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
+                    
+                elif intent == 'Increase':
+                    # 현재 값보다 크게 제약 
+                    lower = current_value + influence_factor * 0.1 
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
 
-            elif v_inj_intent == 'Decrease':
-                upper = v_inj_current - influence_factor * 0.1
-                constraints.append({'type': 'ineq', 'fun': lambda x: upper - x[v_inj_index]})
+                elif intent == 'Decrease':
+                    # 현재 값보다 작게 제약
+                    upper = current_value - influence_factor * 0.1
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
 
-        # 4-2. T_Mold 정성적 노하우
-        if t_mold_index != -1 and t_mold_qual_apply and T_MOLD_VAR in input_vars:
-            if t_mold_intent == 'Keep_Constant':
-                delta = t_mold_current * (1 - influence_factor) * 0.1 
-                lower = t_mold_current - delta
-                upper = t_mold_current + delta
-                constraints.append({'type': 'ineq', 'fun': lambda x: x[t_mold_index] - lower})
-                constraints.append({'type': 'ineq', 'fun': lambda x: upper - x[t_mold_index]})
+
+            # 4-2. 정량적 노하우
+            if settings.get('quant_apply') and settings.get('quant_percent') > 0 and var in input_vars:
+                percent = settings.get('quant_percent')
+                percent_factor = percent / 100.0
                 
-            elif t_mold_intent == 'Increase':
-                lower = t_mold_current + influence_factor * 0.1
-                constraints.append({'type': 'ineq', 'fun': lambda x: x[t_mold_index] - lower})
-
-            elif t_mold_intent == 'Decrease':
-                upper = t_mold_current - influence_factor * 0.1
-                constraints.append({'type': 'ineq', 'fun': lambda x: upper - x[t_mold_index]})
-
-
-        # 4-3. V_Inj 정량적 노하우
-        if v_inj_index != -1 and v_inj_quant_apply and v_inj_quant_percent > 0 and V_INJ_VAR in input_vars:
-            percent_factor = v_inj_quant_percent / 100.0
-            
-            bounds_v_inj = GLOBAL_BOUNDS.get(V_INJ_VAR, (0.0, 300.0))
-            max_delta = v_inj_current * percent_factor
-            
-            lower = v_inj_current - max_delta * (1 - (1 - influence_factor)) 
-            upper = v_inj_current + max_delta * (1 - (1 - influence_factor))
-            
-            lower = max(lower, bounds_v_inj[0])
-            upper = min(upper, bounds_v_inj[1])
-            
-            constraints.append({'type': 'ineq', 'fun': lambda x: x[v_inj_index] - lower})
-            constraints.append({'type': 'ineq', 'fun': lambda x: upper - x[v_inj_index]})
-
-
-        # 4-4. T_Mold 정량적 노하우
-        if t_mold_index != -1 and t_mold_quant_apply and t_mold_quant_percent > 0 and T_MOLD_VAR in input_vars:
-            percent_factor = t_mold_quant_percent / 100.0
-            
-            bounds_t_mold = GLOBAL_BOUNDS.get(T_MOLD_VAR, (0.0, 300.0))
-            max_delta = t_mold_current * percent_factor
-            
-            lower = t_mold_current - max_delta * (1 - (1 - influence_factor)) 
-            upper = t_mold_current + max_delta * (1 - (1 - influence_factor))
-            
-            lower = max(lower, bounds_t_mold[0])
-            upper = min(upper, bounds_t_mold[1])
-            
-            constraints.append({'type': 'ineq', 'fun': lambda x: x[t_mold_index] - lower})
-            constraints.append({'type': 'ineq', 'fun': lambda x: upper - x[t_mold_index]})
-
+                # 정량적 노하우는 초기값의 ±% 범위 내에서 최적화를 시도하도록 제약 (순수 범위 제약)
+                max_delta = current_value * percent_factor
+                
+                lower = current_value - max_delta 
+                upper = current_value + max_delta 
+                
+                lower = max(lower, bounds[0])
+                upper = min(upper, bounds[1])
+                
+                constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
+                constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
 
         # 5. 최적화 실행
         try:
@@ -611,6 +632,7 @@ with tab1:
                 "success": False,
                 "message": f"최적화 중 예외 발생: {e}"
             }
+    # ------------------------------------------------------------------
 
 
     # 진단 및 최적화 버튼
@@ -621,15 +643,8 @@ with tab1:
             
     with col_opt:
         if st.button("최적 공정 조건 제시", type="secondary", use_container_width=True, disabled=st.session_state['model'] is None or not ui_vars):
-            run_optimization_callback(
-                input_vars, 
-                st.session_state['v_inj_qual_intent'], 
-                st.session_state['v_inj_quant_percent'], 
-                st.session_state['v_inj_qual_apply'],
-                st.session_state['t_mold_qual_intent'], 
-                st.session_state['t_mold_quant_percent'], 
-                st.session_state['t_mold_qual_apply']
-            )
+            # 🌟🌟🌟 수정된 부분: 노하우 변수 인수를 제거하고 input_vars만 전달 🌟🌟🌟
+            run_optimization_callback(input_vars)
 
     
     # 결과 표시
