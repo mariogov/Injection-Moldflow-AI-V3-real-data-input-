@@ -696,3 +696,4 @@ with tab2:
             st.warning("학습 데이터가 없습니다.")
     else:
         st.warning("모델 학습이 필요합니다.")
+
