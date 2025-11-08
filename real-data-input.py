@@ -337,13 +337,12 @@ with tab1:
         cols = st.columns(3)
         input_vars = {}
         
-        # 🌟🌟🌟 수정된 부분: st.slider 대신 st.number_input 사용 🌟🌟🌟
+        # st.number_input 사용
         for i, var in enumerate(ui_vars):
             
             # 세션 상태의 global_bounds에서 경계값을 가져옴
             min_val, max_val = st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
             
-            # default_val은 load_and_train_model에서 초기 조건 파일 값 또는 중앙값으로 설정됨
             default_val = st.session_state.get(f'input_{var}', (min_val + max_val) / 2)
             
             # min_val == max_val 인 경우를 위한 안전 장치
@@ -613,6 +612,7 @@ with tab1:
                     "success": True,
                     "optimized_vars": {var: f"{val:.4f}" for var, val in optimized_vars.items()},
                     "optimized_risk": optimized_risk,
+                    "initial_vars": x0_dict, # 초기값 저장
                     "message": "최적 공정 조건 제시 성공"
                 }
             else:
@@ -660,29 +660,62 @@ with tab1:
     if st.session_state['optimization_result']:
         result = st.session_state['optimization_result']
         if result['success']:
-            st.success(f"✅ 최적 공정 조건 제시 완료! (예상 위험도: **{result['optimized_risk'] * 100:.2f}%**)")
             
+            # 🌟🌟🌟 추가된 부분: 최소 불량 위험 확률 🌟🌟🌟
+            st.markdown("#### ✅ 최적화 결과 요약")
+            col_risk, col_message = st.columns([1, 2])
+            with col_risk:
+                st.metric(
+                    label="최소 불량 위험 확률",
+                    value=f"{result['optimized_risk'] * 100:.2f}%",
+                    delta_color="off"
+                )
+            with col_message:
+                st.info(f"💡 최적화 성공 메시지: {result['message']}")
+            st.markdown("---")
+            
+            # 🌟🌟🌟 추가된 부분: 최적화 요약 테이블 🌟🌟🌟
             optimized_vars_data = []
             for var, opt_val_str in result['optimized_vars'].items():
                 opt_val = float(opt_val_str)
-                init_val = input_vars.get(var) if var in input_vars else st.session_state['default_init_values'].get(var, 0.0)
+                init_val = result['initial_vars'].get(var, 0.0) # run_optimization_callback에서 저장된 초기값 사용
                 
+                # 변화량 계산
+                if init_val != 0.0:
+                    percent_change = ((opt_val - init_val) / init_val) * 100
+                else:
+                    percent_change = 0.0 if opt_val == 0.0 else np.nan # 초기값이 0일 경우 예외 처리
+                    
+                # 최적화 방향 결정
+                direction = ""
+                if np.isnan(percent_change):
+                    direction = "N/A"
+                elif opt_val > init_val:
+                    direction = "Increase ▲"
+                elif opt_val < init_val:
+                    direction = "Decrease ▼"
+                else:
+                    direction = "Keep"
+
                 optimized_vars_data.append({
                     'Variable': var,
+                    'Initial Value (Input)': f"{init_val:.2f}",
                     'Optimized Value': f"{opt_val:.2f}",
-                    'Initial Value (Input)': f"{init_val:.2f}"
+                    'Optimization Direction': direction,
+                    'Change (%)': f"{percent_change:.2f}%" if not np.isnan(percent_change) else 'N/A'
                 })
                 
             optimized_df = pd.DataFrame(optimized_vars_data)
             
-            ui_optimized_df = optimized_df[optimized_df['Variable'].isin(st.session_state['ui_display_vars'])]
-            other_optimized_df = optimized_df[~optimized_df['Variable'].isin(st.session_state['ui_display_vars'])]
+            # UI 입력 변수와 나머지 변수 분리
+            ui_optimized_df = optimized_df[optimized_df['Variable'].isin(st.session_state['ui_display_vars'])].reset_index(drop=True)
+            other_optimized_df = optimized_df[~optimized_df['Variable'].isin(st.session_state['ui_display_vars'])].reset_index(drop=True)
             
-            st.write("**최적화된 UI 입력 변수**")
-            st.dataframe(ui_optimized_df.reset_index(drop=True), hide_index=True, use_container_width=True)
+            st.markdown("#### 🚀 최적 공정 조건 상세 (UI 입력 변수)")
+            st.dataframe(ui_optimized_df, hide_index=True, use_container_width=True)
 
             with st.expander("숨겨진 나머지 공정 변수 보기 (고정값)"):
-                st.dataframe(other_optimized_df.reset_index(drop=True), hide_index=True, use_container_width=True)
+                st.dataframe(other_optimized_df, hide_index=True, use_container_width=True)
             
         else:
             st.error(f"❌ 최적화 실패: {result['message']}")
