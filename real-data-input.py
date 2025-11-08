@@ -55,7 +55,7 @@ if 'conf_level' not in st.session_state:
 if 'influence_factor_display_val' not in st.session_state:
     st.session_state['influence_factor_display_val'] = st.session_state['conf_level'] / 100.0
 
-# 🌟🌟🌟 수정된 부분: 모든 변수의 노하우 설정 및 경계값 저장 🌟🌟🌟
+# 모든 변수의 노하우 설정 및 경계값 저장
 if 'knowhow_settings' not in st.session_state:
     st.session_state['knowhow_settings'] = {}
     
@@ -65,7 +65,6 @@ if 'knowhow_temp_storage' not in st.session_state:
 # UI 입력 변수의 현재 경계값을 저장 (사용자 수정 가능)
 if 'global_bounds' not in st.session_state:
     st.session_state['global_bounds'] = GLOBAL_BOUNDS.copy() 
-# ------------------------------------------------------------------
 
 
 # -------------------------------------------------------------
@@ -255,13 +254,12 @@ with st.sidebar:
             
             init_row = st.session_state['df_init'].iloc[0].to_dict()
             
-            # UI 슬라이더 초기값 설정
+            # UI 입력 변수 초기값 설정
             for var in st.session_state['ui_display_vars']:
-                # 🌟🌟🌟 수정된 부분: 경계값 초기화 시 global_bounds도 업데이트 🌟🌟🌟
+                # 경계값 초기화 시 global_bounds도 업데이트
                 min_val = GLOBAL_BOUNDS.get(var, (0.0, 300.0))[0] 
                 max_val = GLOBAL_BOUNDS.get(var, (0.0, 300.0))[1] 
                 st.session_state['global_bounds'][var] = (min_val, max_val)
-                # ------------------------------------------------------------------
                 
                 if var in init_row:
                     try:
@@ -326,7 +324,7 @@ st.title("Weld Line AI 통합 진단 및 최적화 시스템")
 tab1, tab2 = st.tabs(["탭 1. 진단 및 최적 공정 조건 제시", "탭 2. 모델 및 데이터 확인"])
 
 with tab1:
-    st.header("A. 현재 공정 조건 입력")
+    st.header("A. 현재 공정 조건 입력 (숫자 직접 입력)")
     
     ui_vars = st.session_state['ui_display_vars']
     
@@ -339,13 +337,13 @@ with tab1:
         cols = st.columns(3)
         input_vars = {}
         
-        # UI 입력 변수 슬라이더 동적 생성
+        # 🌟🌟🌟 수정된 부분: st.slider 대신 st.number_input 사용 🌟🌟🌟
         for i, var in enumerate(ui_vars):
             
-            # 🌟🌟🌟 수정된 부분: 세션 상태의 global_bounds에서 경계값을 가져옴 🌟🌟🌟
-            # UI Slider의 범위는 항상 global_bounds에 설정된 값입니다.
+            # 세션 상태의 global_bounds에서 경계값을 가져옴
             min_val, max_val = st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
             
+            # default_val은 load_and_train_model에서 초기 조건 파일 값 또는 중앙값으로 설정됨
             default_val = st.session_state.get(f'input_{var}', (min_val + max_val) / 2)
             
             # min_val == max_val 인 경우를 위한 안전 장치
@@ -357,13 +355,15 @@ with tab1:
                  max_val_safe = max_val
 
             with cols[i % 3]:
-                input_vars[var] = st.slider(
+                # st.number_input: 직접 숫자 입력 창
+                input_vars[var] = st.number_input(
                     f'{var}', 
-                    min_val_safe, 
-                    max_val_safe, 
+                    min_value=min_val_safe, 
+                    max_value=max_val_safe, 
                     value=default_val, 
-                    step=(max_val_safe - min_val_safe) / 100.0,
-                    key=f'slider_{var}',
+                    step=(max_val_safe - min_val_safe) / 100.0, 
+                    format="%.2f", # 소수점 둘째 자리까지 표시
+                    key=f'input_{var}', # 세션 상태 키를 그대로 사용하여 값 저장
                     on_change=lambda: st.session_state.update({'current_risk_display': None, 'optimization_result': None})
                 )
                 
@@ -387,7 +387,7 @@ with tab1:
     )
     st.markdown('<div style="margin-top: -20px; font-size: 12px; color: grey;">(확신 수준이 높을수록 노하우 방향(Increase/Decrease)을 강력하게 따릅니다.)</div>', unsafe_allow_html=True)
     
-    # 🌟🌟🌟 수정된 부분: 변수 조절 의도 및 조건값 선택 버튼 (점진적 노출) 🌟🌟🌟
+    # 변수 조절 의도 및 조건값 선택 버튼 (점진적 노출)
     st.subheader("2. 공정 변수별 조절 의도 및 조건 (방향 및 경계)")
     
     if not ui_vars:
@@ -403,7 +403,7 @@ with tab1:
             
             current_intent = settings.get('qual_intent', 'Keep_Constant')
             
-            # 현재 경계값 (slider의 min/max 값)
+            # 현재 경계값 (input의 min/max 값)
             current_bounds = st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
             
             with cols[i % 3]:
@@ -438,14 +438,14 @@ with tab1:
                     def update_bounds(v, min_v, max_v):
                         # 슬라이더에서 설정된 min/max 값을 global_bounds에 반영
                         st.session_state['global_bounds'][v] = (min_v, max_v)
-                        # UI 입력 슬라이더의 중앙값으로 재설정하여 즉시 반영
+                        # UI 입력창의 중앙값으로 재설정하여 즉시 반영
                         st.session_state[f'input_{v}'] = (min_v + max_v) / 2 
                         st.session_state['optimization_result'] = None
                         
                     # 경계 변경 확정 버튼
                     if st.button(f'**{var}** 경계 조건 적용 및 UI 반영', key=f'apply_bounds_{var}', use_container_width=True):
                         update_bounds(var, new_min, new_max)
-                        st.success(f"✅ **{var}**의 조건 범위가 [{new_min:.2f}, {new_max:.2f}]로 업데이트되었고, UI 슬라이더에 반영되었습니다.")
+                        st.success(f"✅ **{var}**의 조건 범위가 [{new_min:.2f}, {new_max:.2f}]로 업데이트되었고, UI 입력창에 반영되었습니다.")
 
 
                 # 3. 노하우 설정값 임시 저장
@@ -458,8 +458,6 @@ with tab1:
         
         # 루프 종료 후 최종적으로 knowhow_settings 업데이트
         st.session_state['knowhow_settings'].update(st.session_state['knowhow_temp_storage'])
-
-    # ------------------------------------------------------------------
 
 
     st.markdown("---")
@@ -496,7 +494,7 @@ with tab1:
 
         full_input_data = {}
         
-        # 1. UI 입력값 (슬라이더 값)
+        # 1. UI 입력값 (number_input 값)
         for var in input_vars:
             full_input_data[var] = input_vars[var]
 
@@ -522,7 +520,7 @@ with tab1:
             st.session_state['optimization_result'] = {"success": False, "message": "모델이 학습되지 않았습니다."}
             return
             
-        # 🌟 1. 초기 조건 (X0): 전체 변수를 포함
+        # 1. 초기 조건 (X0): 전체 변수를 포함
         x0_dict = {}
         for var in global_vars:
              if var in input_vars:
@@ -532,11 +530,11 @@ with tab1:
         
         x0 = np.array([x0_dict[var] for var in global_vars])
         
-        # 🌟 2. 경계 조건 (Bounds): 전체 변수를 포함
+        # 2. 경계 조건 (Bounds): 전체 변수를 포함
         bounds_list = []
         for var in global_vars:
             if var in input_vars:
-                # 🌟🌟🌟 수정된 부분: 세션 상태의 global_bounds 사용 🌟🌟🌟
+                # UI 입력 변수는 세션 상태의 global_bounds 사용
                 bounds_list.append(st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0))))
             else:
                 # 나머지 변수는 현재 초기값으로 고정 (제약 조건)
@@ -565,30 +563,27 @@ with tab1:
             
             intent = settings.get('qual_intent')
             
-            # 🌟🌟🌟 수정된 부분: 세션 상태의 global_bounds에서 경계값 가져오기 🌟🌟🌟
+            # 경계값은 세션 상태의 global_bounds에서 가져옵니다.
             bounds = st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
 
             # 4-1. 정성적 노하우 (Keep_Constant, Increase, Decrease)
             
             if intent == 'Keep_Constant':
                 # Keep_Constant: 현재 값 근처에 제약. (노하우 확신 수준이 1에 가까울수록 더 좁게 제약)
-                # 최대 변동 폭을 전체 범위의 1%로 가정
                 range_span = bounds[1] - bounds[0] 
                 max_delta = range_span * 0.01 
                 
-                # 확신 수준이 100%(1.0)이면 변동 폭 0으로 고정, 0%(0.0)이면 최대 변동 폭 허용
+                # 확신 수준이 100%(1.0)이면 변동 폭 0으로 고정
                 delta = max_delta * (1 - influence_factor) 
                 
                 lower = max(current_value - delta, bounds[0])
                 upper = min(current_value + delta, bounds[1])
                 
-                # 람다 함수 내에서 변수 캡처를 위해 기본 인수를 사용
                 constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
                 constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
                 
             elif intent == 'Increase':
                 # Increase: 현재 값보다 일정 수준 이상으로 제약 (영향 계수만큼 강하게)
-                # 최소 증가량을 전체 범위의 5%로 가정
                 increase_base = (bounds[1] - bounds[0]) * 0.05
                 lower_limit = current_value + influence_factor * increase_base
                 
@@ -598,7 +593,6 @@ with tab1:
 
             elif intent == 'Decrease':
                 # Decrease: 현재 값보다 일정 수준 이하로 제약 (영향 계수만큼 강하게)
-                # 최소 감소량을 전체 범위의 5%로 가정
                 decrease_base = (bounds[1] - bounds[0]) * 0.05
                 upper_limit = current_value - influence_factor * decrease_base
                 
