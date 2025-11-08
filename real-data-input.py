@@ -155,9 +155,20 @@ def train_model(df):
         return None, None
         
     global_vars = st.session_state['global_process_vars']
+    
+    # 🌟🌟🌟 수정된 로직: 타겟 변수 및 독립 변수 추출 🌟🌟🌟
     X = df[global_vars]
     Y = df[TARGET_VAR]
+
+    # 🚨 ValueError 방지를 위한 핵심 체크
+    if Y.nunique() < 2:
+        st.error(f"🚨 모델 학습 실패: 타겟 변수('{TARGET_VAR}')에 **두 개 이상의 클래스** (0과 1)가 존재해야 합니다. 현재 데이터셋에는 클래스가 {Y.nunique()}개만 존재합니다. 학습 데이터 파일을 확인해 주세요.")
+        return None, None
+    # -----------------------------------------------------
     
+    # NaN/Inf 값 체크는 MinMaxScaler/fit_transform에서 처리되지만, 명시적으로 방어 코드를 남기지 않습니다.
+    # df.fillna(0)에서 대부분의 NaN은 처리되었음.
+
     scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(X)
     
@@ -219,7 +230,6 @@ with st.sidebar:
         st.session_state['current_risk_display'] = None
         st.session_state['optimization_result'] = None
         
-        # 🌟 필수 파일 체크
         if st.session_state['df_init'] is None or st.session_state['df_init'].empty:
             st.error("🚨 UI 초기 조건 파일(1번)이 로드되지 않았습니다. UI 구성을 할 수 없습니다.")
             return
@@ -235,6 +245,7 @@ with st.sidebar:
             st.session_state['scaler'] = None
             return
 
+        # 수정된 train_model 호출
         model, scaler = train_model(st.session_state['df_weld'])
         st.session_state['model'] = model
         st.session_state['scaler'] = scaler
@@ -242,7 +253,6 @@ with st.sidebar:
         if model is not None:
             st.success(f"✅ AI 모델 학습 및 로드 완료! (총 **{len(global_vars)}개** 변수 사용)")
             
-            # 🌟 핵심 수정: UI 입력 변수를 df_init의 컬럼에서 TARGET_VAR를 제외하고 설정
             all_init_cols = list(st.session_state['df_init'].columns)
             ui_vars_to_display = [col for col in all_init_cols if col != TARGET_VAR]
             st.session_state['ui_display_vars'] = ui_vars_to_display
@@ -252,7 +262,6 @@ with st.sidebar:
             
             init_row = st.session_state['df_init'].iloc[0].to_dict()
             
-            # UI_INPUT_VARS에 대해서만 슬라이더 값 업데이트 및 세션 상태에 저장
             for var in st.session_state['ui_display_vars']:
                 if var in init_row:
                     try:
@@ -263,7 +272,6 @@ with st.sidebar:
                 else:
                     st.session_state[f'input_{var}'] = 0.0
 
-            # GLOBAL_PROCESS_VARS 중 UI_DISPLAY_VARS에 없는 변수의 초기값을 저장
             default_init_values = {}
             for var in global_vars:
                 if var not in st.session_state['ui_display_vars']:
@@ -271,6 +279,9 @@ with st.sidebar:
                 
             st.session_state['default_init_values'] = default_init_values
             st.success("✅ UI 입력 변수 및 전체 변수 기본값 설정 완료")
+        else:
+             # train_model에서 오류가 발생했으므로 여기서 추가 메시지를 표시할 필요 없음
+             pass
 
 
     st.button("🚀 파일 로드 및 AI 모델 학습 시작", on_click=load_and_train_model)
@@ -304,7 +315,6 @@ with tab1:
     st.header("A. 현재 공정 조건 입력")
     
     ui_vars = st.session_state['ui_display_vars']
-    num_vars = len(ui_vars)
     
     if not ui_vars and st.session_state['df_init'] is not None:
         st.info("💡 UI 입력 변수 목록은 로드된 초기 조건 파일에서 **Y_Weld를 제외한** 컬럼으로 구성됩니다.")
@@ -315,14 +325,11 @@ with tab1:
         cols = st.columns(3)
         input_vars = {}
         
-        # 🌟 UI 입력 변수 슬라이더 동적 생성 (기존 로직 유지)
         for i, var in enumerate(ui_vars):
-            # 변수 범위 설정 (임시 경계 또는 기본값 0.0~300.0)
             min_val = GLOBAL_BOUNDS.get(var, (0.0, 300.0))[0] 
             max_val = GLOBAL_BOUNDS.get(var, (0.0, 300.0))[1] 
             default_val = st.session_state.get(f'input_{var}', (min_val + max_val) / 2)
             
-            # min과 max가 같으면 슬라이더 오류가 발생하므로, 약간의 차이를 줌
             if min_val == max_val:
                  min_val -= 1.0
                  max_val += 1.0
@@ -343,7 +350,6 @@ with tab1:
     # B. 전문가의 정성적/정량적 노하우 입력
     st.header("B. 전문가의 정성적/정량적 노하우 입력")
     
-    # 1. 전문가 확신 수준 (기존 로직 유지)
     st.subheader("1. 전문가 확신 수준")
     st.write("노하우 반영도 (%)") 
     expert_confidence = st.slider(
@@ -358,7 +364,6 @@ with tab1:
     )
     st.markdown('<div style="margin-top: -20px; font-size: 12px; color: grey;">(0%는 노하우 미반영, 100%는 노하우를 제약 조건으로 강력히 적용)</div>', unsafe_allow_html=True)
     
-    # V_Inj, T_Mold 변수명 검증 (하드코딩된 변수명 'V_Inj', 'T_Mold'가 UI 입력 변수에 있는지 확인)
     V_INJ_VAR = 'V_Inj'
     T_MOLD_VAR = 'T_Mold'
     V_INJ_VAR_EXISTS_IN_UI = V_INJ_VAR in st.session_state['ui_display_vars']
@@ -368,7 +373,6 @@ with tab1:
     # 2. 사출 속도 (V_Inj)
     st.subheader(f"2. 사출 속도 ({V_INJ_VAR})")
     if V_INJ_VAR_EXISTS_IN_UI:
-        # 노하우 UI 구성 (기존 로직 유지)
         col_v_qual, col_v_intent, col_v_quant, col_v_delta = st.columns(4)
         with col_v_qual:
              v_inj_qual_apply = st.checkbox('정성적 노하우 적용', value=st.session_state['v_inj_qual_apply'], key='v_inj_qual_apply_chk', on_change=lambda: st.session_state.update({'optimization_result': None}))
@@ -393,7 +397,6 @@ with tab1:
     # 3. 금형 온도 (T_Mold)
     st.subheader(f"3. 금형 온도 ({T_MOLD_VAR})")
     if T_MOLD_VAR_EXISTS_IN_UI:
-        # 노하우 UI 구성 (기존 로직 유지)
         col_t_qual, col_t_intent, col_t_quant, col_t_delta = st.columns(4)
         with col_t_qual:
             t_mold_qual_apply = st.checkbox('정성적 노하우 적용', value=st.session_state['t_mold_qual_apply'], key='t_mold_qual_apply_chk', on_change=lambda: st.session_state.update({'optimization_result': None}))
@@ -417,7 +420,7 @@ with tab1:
 
     st.markdown("---")
 
-    # C. 진단 실행 및 결과 (기존 로직 유지)
+    # C. 진단 실행 및 결과
     st.header("C. 진단 실행 및 결과")
 
     st.write("노하우 영향 계수")
@@ -449,11 +452,9 @@ with tab1:
 
         full_input_data = {}
         
-        # 1. UI 입력값 (슬라이더 값)
         for var in input_vars:
             full_input_data[var] = input_vars[var]
 
-        # 2. 나머지 변수 (UI 입력창이 없는 변수 - 고정값)
         for var in global_vars:
             if var not in full_input_data:
                 full_input_data[var] = st.session_state['default_init_values'].get(var, 0.0) 
@@ -482,9 +483,9 @@ with tab1:
         x0_dict = {}
         for var in global_vars:
              if var in input_vars:
-                 x0_dict[var] = input_vars[var] # UI 슬라이더 값
+                 x0_dict[var] = input_vars[var] 
              else:
-                 x0_dict[var] = st.session_state['default_init_values'].get(var, 0.0) # 나머지 변수의 초기값
+                 x0_dict[var] = st.session_state['default_init_values'].get(var, 0.0) 
         
         x0 = np.array([x0_dict[var] for var in global_vars])
         
@@ -492,10 +493,8 @@ with tab1:
         bounds_list = []
         for var in global_vars:
             if var in input_vars:
-                # UI 입력 변수는 GLOBAL_BOUNDS 또는 임시 경계 사용
                 bounds_list.append(GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
             else:
-                # 나머지 변수는 현재 초기값으로 고정 (제약 조건)
                 init_val = x0_dict[var]
                 bounds_list.append((init_val, init_val))
 
@@ -506,7 +505,7 @@ with tab1:
             risk = predict_weld_risk(model, scaler, x_series)
             return risk
 
-        # 4. 제약 조건 (Constraints): 노하우 반영 (기존 로직 유지)
+        # 4. 제약 조건 (Constraints): 노하우 반영
         constraints = []
         influence_factor = st.session_state['influence_factor_display_val']
         
