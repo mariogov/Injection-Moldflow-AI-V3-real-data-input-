@@ -66,6 +66,10 @@ if 'knowhow_temp_storage' not in st.session_state:
 if 'global_bounds' not in st.session_state:
     st.session_state['global_bounds'] = GLOBAL_BOUNDS.copy() 
 
+# 🌟🌟🌟 신규 추가: 노하우 적용 대상 변수 목록 🌟🌟🌟
+if 'selected_knowhow_vars' not in st.session_state:
+    st.session_state['selected_knowhow_vars'] = []
+
 
 # -------------------------------------------------------------
 # 콜백 함수: 전문가 확신 수준 변경 시 영향 계수 업데이트
@@ -85,7 +89,6 @@ def update_influence_factor():
     
     st.session_state['current_risk_display'] = None 
     st.session_state['optimization_result'] = None 
-
 
 # =================================================================
 # 1. 데이터 로드 및 전처리 함수
@@ -294,6 +297,10 @@ with st.sidebar:
                     }
             st.session_state['knowhow_settings'] = knowhow_settings
             st.session_state['knowhow_temp_storage'] = {} # 임시 저장소 초기화
+            
+            # 🌟🌟🌟 신규 추가: 주요 변수 기본 선택 (모두 선택) 🌟🌟🌟
+            if not st.session_state['selected_knowhow_vars']:
+                st.session_state['selected_knowhow_vars'] = st.session_state['ui_display_vars'].copy()
 
 
     st.button("🚀 파일 로드 및 AI 모델 학습 시작", on_click=load_and_train_model)
@@ -371,7 +378,7 @@ with tab1:
     # B. 전문가 노하우 입력 (점진적 노출 적용)
     st.header("B. 전문가 노하우 입력")
     
-    # 1. 전문가 확신 수준 (노하우 반영 강도)
+    # 🌟🌟🌟 수정된 부분: 1. 전문가 확신 수준 (강도)
     st.subheader("1. 전문가 확신 수준 (강도)")
     st.write("노하우 반영 강도 (%)") 
     st.slider(
@@ -386,16 +393,35 @@ with tab1:
     )
     st.markdown('<div style="margin-top: -20px; font-size: 12px; color: grey;">(확신 수준이 높을수록 노하우 방향(Increase/Decrease)을 강력하게 따릅니다.)</div>', unsafe_allow_html=True)
     
-    # 변수 조절 의도 및 조건값 선택 버튼 (점진적 노출)
-    st.subheader("2. 공정 변수별 조절 의도 및 조건 (방향 및 경계)")
+    st.markdown("---")
     
-    if not ui_vars:
+    # 🌟🌟🌟 신규 추가: 주요 변수 선택 UI
+    st.subheader("2. 노하우 적용 주요 변수 선택")
+    if ui_vars:
+        st.session_state['selected_knowhow_vars'] = st.multiselect(
+            '노하우 (Increase/Decrease) 제약을 적용할 변수를 선택하세요. 미선택 변수는 자동으로 **Keep_Constant** 제약이 적용됩니다.',
+            options=ui_vars,
+            default=st.session_state['selected_knowhow_vars'],
+            key='knowhow_multiselect_vars',
+            on_change=lambda: st.session_state.update({'optimization_result': None})
+        )
+    else:
         st.info("UI 입력 변수가 없습니다. **모델 학습**을 먼저 실행해 주세요.")
+        
+    st.markdown("---")
+    
+    # 🌟🌟🌟 수정된 부분: 3. 공정 변수별 조절 의도 및 조건
+    st.subheader("3. 선택된 변수 조절 의도 및 조건 (방향 및 경계)")
+    
+    selected_vars = st.session_state['selected_knowhow_vars']
+    
+    if not selected_vars:
+        st.warning("⬆️ 위에 노하우를 적용할 변수를 선택해 주세요. 현재 모든 변수에 **Keep_Constant** 제약이 적용됩니다.")
     else:
         
         cols = st.columns(3)
         
-        for i, var in enumerate(ui_vars):
+        for i, var in enumerate(selected_vars): # 선택된 변수만 반복
             
             settings = st.session_state['knowhow_temp_storage'].get(var) or \
                        st.session_state['knowhow_settings'].get(var, {'qual_intent': 'Keep_Constant'}) 
@@ -406,10 +432,11 @@ with tab1:
             current_bounds = st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
             
             with cols[i % 3]:
-                # 1. 조절 의도 Selectbox (메인 UI)
+                # 1. 조절 의도 Selectbox
                 intent = st.selectbox(
                     f'{var} 조절 의도', 
                     ['Keep_Constant', 'Increase', 'Decrease'], 
+                    # 미선택 변수는 Keep_Constant가 강제되므로, 선택된 변수는 Keep_Constant를 포함할 수 있도록 유지
                     index=['Keep_Constant', 'Increase', 'Decrease'].index(current_intent),
                     key=f'intent_{var}_selectbox',
                     on_change=lambda: st.session_state.update({'optimization_result': None})
@@ -435,10 +462,8 @@ with tab1:
                     
                     # 버튼 클릭 시 세션 상태 업데이트 함수
                     def update_bounds(v, min_v, max_v):
-                        # 슬라이더에서 설정된 min/max 값을 global_bounds에 반영
                         st.session_state['global_bounds'][v] = (min_v, max_v)
-                        # UI 입력창의 중앙값으로 재설정하여 즉시 반영
-                        st.session_state[f'input_{v}'] = (min_v + max_v) / 2 
+                        st.session_state[f'input_{v}'] = (min_v + max_val) / 2 
                         st.session_state['optimization_result'] = None
                         
                     # 경계 변경 확정 버튼
@@ -457,6 +482,19 @@ with tab1:
         
         # 루프 종료 후 최종적으로 knowhow_settings 업데이트
         st.session_state['knowhow_settings'].update(st.session_state['knowhow_temp_storage'])
+
+        # 🌟🌟🌟 미선택된 변수에 대해 Keep_Constant 강제 적용 🌟🌟🌟
+        unselected_vars = [v for v in ui_vars if v not in selected_vars]
+        for var in unselected_vars:
+            st.session_state['knowhow_settings'][var] = {
+                'qual_intent': 'Keep_Constant',
+                'qual_apply': False, 
+                'quant_apply': False, 
+                'quant_percent': 0.0 
+            }
+            # 미선택 변수의 경계는 현재 입력값으로 고정 (최적화 시 고정)
+            current_input_val = st.session_state.get(f'input_{var}', 0.0)
+            st.session_state['global_bounds'][var] = (current_input_val, current_input_val)
 
 
     st.markdown("---")
@@ -533,10 +571,21 @@ with tab1:
         bounds_list = []
         for var in global_vars:
             if var in input_vars:
-                # UI 입력 변수는 세션 상태의 global_bounds 사용
-                bounds_list.append(st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0))))
+                # 🌟🌟🌟 수정된 부분: 노하우 적용 대상/미대상에 따라 경계값 설정 방식 변경
+                
+                # UI 입력 변수 중 노하우 적용 대상 변수
+                if var in st.session_state['selected_knowhow_vars']:
+                    # 노하우가 적용되는 변수는 세션 상태의 global_bounds (사용자가 설정한 범위) 사용
+                    bounds_list.append(st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0))))
+                
+                # UI 입력 변수 중 노하우 미적용 대상 변수
+                else:
+                    # 미선택된 변수는 현재 입력값으로 고정 (범위를 현재 값으로 좁힘)
+                    init_val = x0_dict[var]
+                    bounds_list.append((init_val, init_val)) 
+                    
             else:
-                # 나머지 변수는 현재 초기값으로 고정 (제약 조건)
+                # 나머지 변수 (UI 입력창이 없는 변수 - 고정값)
                 init_val = x0_dict[var]
                 bounds_list.append((init_val, init_val))
 
@@ -562,42 +611,46 @@ with tab1:
             
             intent = settings.get('qual_intent')
             
-            # 경계값은 세션 상태의 global_bounds에서 가져옵니다.
-            bounds = st.session_state['global_bounds'].get(var, GLOBAL_BOUNDS.get(var, (0.0, 300.0)))
+            # 경계값은 세션 상태의 global_bounds에서 가져옵니다. (위에서 설정된 최적화 경계)
+            bounds = bounds_list[index] 
 
-            # 4-1. 정성적 노하우 (Keep_Constant, Increase, Decrease)
+            # 🌟🌟🌟 수정된 부분: 노하우 적용 변수만 Increase/Decrease 로직 적용
             
-            if intent == 'Keep_Constant':
-                # Keep_Constant: 현재 값 근처에 제약. (노하우 확신 수준이 1에 가까울수록 더 좁게 제약)
-                range_span = bounds[1] - bounds[0] 
-                max_delta = range_span * 0.01 
+            if var in st.session_state['selected_knowhow_vars']:
                 
-                # 확신 수준이 100%(1.0)이면 변동 폭 0으로 고정
-                delta = max_delta * (1 - influence_factor) 
-                
-                lower = max(current_value - delta, bounds[0])
-                upper = min(current_value + delta, bounds[1])
-                
-                constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
-                constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
-                
-            elif intent == 'Increase':
-                # Increase: 현재 값보다 일정 수준 이상으로 제약 (영향 계수만큼 강하게)
-                increase_base = (bounds[1] - bounds[0]) * 0.05
-                lower_limit = current_value + influence_factor * increase_base
-                
-                lower = min(lower_limit, bounds[1]) # 상한 경계를 넘지 않도록
-                
-                constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
+                if intent == 'Keep_Constant':
+                    # Keep_Constant: 현재 값 근처에 제약. (노하우 확신 수준이 1에 가까울수록 더 좁게 제약)
+                    range_span = bounds[1] - bounds[0] 
+                    max_delta = range_span * 0.01 
+                    
+                    # 확신 수준이 100%(1.0)이면 변동 폭 0으로 고정
+                    delta = max_delta * (1 - influence_factor) 
+                    
+                    lower = max(current_value - delta, bounds[0])
+                    upper = min(current_value + delta, bounds[1])
+                    
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
+                    
+                elif intent == 'Increase':
+                    # Increase: 현재 값보다 일정 수준 이상으로 제약 (영향 계수만큼 강하게)
+                    increase_base = (bounds[1] - bounds[0]) * 0.05
+                    lower_limit = current_value + influence_factor * increase_base
+                    
+                    lower = min(lower_limit, bounds[1]) # 상한 경계를 넘지 않도록
+                    
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, l=lower: x[i] - l})
 
-            elif intent == 'Decrease':
-                # Decrease: 현재 값보다 일정 수준 이하로 제약 (영향 계수만큼 강하게)
-                decrease_base = (bounds[1] - bounds[0]) * 0.05
-                upper_limit = current_value - influence_factor * decrease_base
-                
-                upper = max(upper_limit, bounds[0]) # 하한 경계를 넘지 않도록
-                
-                constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
+                elif intent == 'Decrease':
+                    # Decrease: 현재 값보다 일정 수준 이하로 제약 (영향 계수만큼 강하게)
+                    decrease_base = (bounds[1] - bounds[0]) * 0.05
+                    upper_limit = current_value - influence_factor * decrease_base
+                    
+                    upper = max(upper_limit, bounds[0]) # 하한 경계를 넘지 않도록
+                    
+                    constraints.append({'type': 'ineq', 'fun': lambda x, i=index, u=upper: u - x[i]})
+                    
+            # 🌟🌟🌟 미선택된 변수는 이미 Bounds에서 고정되었으므로, 추가적인 제약(Constraints)은 필요 없음.
 
         # 5. 최적화 실행
         try:
@@ -661,7 +714,6 @@ with tab1:
         result = st.session_state['optimization_result']
         if result['success']:
             
-            # 🌟🌟🌟 추가된 부분: 최소 불량 위험 확률 🌟🌟🌟
             st.markdown("#### ✅ 최적화 결과 요약")
             col_risk, col_message = st.columns([1, 2])
             with col_risk:
@@ -674,19 +726,16 @@ with tab1:
                 st.info(f"💡 최적화 성공 메시지: {result['message']}")
             st.markdown("---")
             
-            # 🌟🌟🌟 추가된 부분: 최적화 요약 테이블 🌟🌟🌟
             optimized_vars_data = []
             for var, opt_val_str in result['optimized_vars'].items():
                 opt_val = float(opt_val_str)
-                init_val = result['initial_vars'].get(var, 0.0) # run_optimization_callback에서 저장된 초기값 사용
+                init_val = result['initial_vars'].get(var, 0.0) 
                 
-                # 변화량 계산
                 if init_val != 0.0:
                     percent_change = ((opt_val - init_val) / init_val) * 100
                 else:
-                    percent_change = 0.0 if opt_val == 0.0 else np.nan # 초기값이 0일 경우 예외 처리
+                    percent_change = 0.0 if opt_val == 0.0 else np.nan 
                     
-                # 최적화 방향 결정
                 direction = ""
                 if np.isnan(percent_change):
                     direction = "N/A"
@@ -707,7 +756,6 @@ with tab1:
                 
             optimized_df = pd.DataFrame(optimized_vars_data)
             
-            # UI 입력 변수와 나머지 변수 분리
             ui_optimized_df = optimized_df[optimized_df['Variable'].isin(st.session_state['ui_display_vars'])].reset_index(drop=True)
             other_optimized_df = optimized_df[~optimized_df['Variable'].isin(st.session_state['ui_display_vars'])].reset_index(drop=True)
             
